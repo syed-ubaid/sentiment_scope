@@ -1,61 +1,52 @@
-import argparse
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, Field
 from textblob import TextBlob
-import sys
+import uvicorn
 
-def analyze_sentiment(text):
-    """
-    Analyzes the sentiment of the given text using TextBlob.
-    Returns the polarity and subjectivity.
-    """
-    blob = TextBlob(text)
-    return blob.sentiment
+app = FastAPI(
+    title="Sentiment Scope API",
+    description="A microservice for sentiment analysis using TextBlob",
+    version="1.0.0"
+)
 
-def print_banner():
-    print("=" * 40)
-    print("   SENTIMENT SCOPE - AI Analyzer")
-    print("=" * 40)
+class AnalysisRequest(BaseModel):
+    text: str = Field(..., min_length=1, description="The text content to analyze")
 
-def main():
-    print_banner()
-    
-    parser = argparse.ArgumentParser(description="Analyze the sentiment of a text string.")
-    parser.add_argument("text", nargs="?", help="The text to analyze. If omitted, you will be prompted.")
-    args = parser.parse_args()
+class SentimentResponse(BaseModel):
+    text: str
+    polarity: float
+    subjectivity: float
+    verdict: str
 
-    text = args.text
-    if not text:
-        try:
-            text = input("Enter text to analyze: ")
-        except KeyboardInterrupt:
-            sys.exit(0)
-
-    if not text.strip():
-        print("Error: No text provided.")
-        return
-
-    sentiment = analyze_sentiment(text)
-    
-    print("\n--- Analysis Results ---")
-    print(f"Input: \"{text}\"\n")
-    
-    # Polarity: -1.0 (Negative) to 1.0 (Positive)
-    polarity = sentiment.polarity
-    print(f"Polarity Score: {polarity:.2f}")
-    print("  [-1.0 (Negative) ... 0 (Neutral) ... 1.0 (Positive)]")
-    
-    # Subjectivity: 0.0 (Objective) to 1.0 (Subjective)
-    subjectivity = sentiment.subjectivity
-    print(f"Subjectivity Score: {subjectivity:.2f}")
-    print("  [0.0 (Fact) ... 1.0 (Opinion)]")
-
-    print("\nVERDICT:")
+def get_verdict(polarity: float) -> str:
     if polarity > 0.1:
-        print("  \u2705 POSITIVE vibe")
+        return "POSITIVE"
     elif polarity < -0.1:
-        print("  \u274C NEGATIVE vibe")
+        return "NEGATIVE"
     else:
-        print("  \u2796 NEUTRAL vibe")
-    print("=" * 40)
+        return "NEUTRAL"
+
+@app.post("/analyze", response_model=SentimentResponse)
+async def analyze_sentiment(request: AnalysisRequest):
+    """
+    Analyze the sentiment of the provided text.
+    """
+    try:
+        blob = TextBlob(request.text)
+        sentiment = blob.sentiment
+        
+        return SentimentResponse(
+            text=request.text,
+            polarity=round(sentiment.polarity, 4),
+            subjectivity=round(sentiment.subjectivity, 4),
+            verdict=get_verdict(sentiment.polarity)
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}
 
 if __name__ == "__main__":
-    main()
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
